@@ -1,4 +1,4 @@
-﻿namespace Sitecore.Cintel
+﻿namespace Sitecore.Support.Cintel
 {
   using Sitecore.Analytics.Model;
   using Sitecore.Cintel.Commons;
@@ -12,6 +12,7 @@
   using System;
   using System.Collections.Generic;
   using System.Linq;
+  using Sitecore.Cintel;
 
   public class ContactSearchProvider : IContactSearchProvider
   {
@@ -44,12 +45,17 @@
       Func<IndexedContact, IContactSearchResult> selector = null;
       using (IProviderSearchContext ctx = index.CreateSearchContext(SearchSecurityOptions.Default))
       {
-        SearchResults<IndexedContact> results = this.QueryIndex(ctx, parameters);
+        //patch code starts
+        var exactResults = QueryIndexExactMatch(ctx, parameters);
+        SearchResults<IndexedContact> results = exactResults.TotalSearchResults > 0 ? exactResults : this.QueryIndex(ctx, parameters);
+        //patch code ends
+
         List<IndexedContact> source = (from h in results.Hits select h.Document).ToList<IndexedContact>();
         set.TotalResultCount = results.TotalSearchResults;
         if (selector == null)
         {
-          selector = delegate (IndexedContact sr) {
+          selector = delegate (IndexedContact sr)
+          {
             IContactSearchResult contact = this.BuildBaseResult(sr);
             IndexedVisit visit = (from iv in ctx.GetQueryable<IndexedVisit>()
                                   where iv.ContactId == contact.ContactId
@@ -105,6 +111,22 @@
                      where q.FullName.Like<string>(text, slop) || q.Emails.Like<List<string>>(text, slop)
                      select q;
       }
+      return queryable2.Page<IndexedContact>((parameters.PageNumber - 1), parameters.PageSize).GetResults<IndexedContact>();
+    }
+
+    private SearchResults<IndexedContact> QueryIndexExactMatch(IProviderSearchContext ctx, ContactSearchParameters parameters)
+    {
+      IQueryable<IndexedContact> source = ctx.GetQueryable<IndexedContact>();
+      string text = parameters.Match;
+      if (string.IsNullOrEmpty(text.Trim()) || (text == "*"))
+      {
+        return source.Page<IndexedContact>((parameters.PageNumber - 1), parameters.PageSize).GetResults<IndexedContact>();
+      }
+
+      var queryable2 = from q in source
+                       where q.FullName.Like<string>(text, 0) || q.Emails.Like<List<string>>(text, 0)
+                       select q;
+
       return queryable2.Page<IndexedContact>((parameters.PageNumber - 1), parameters.PageSize).GetResults<IndexedContact>();
     }
   }
